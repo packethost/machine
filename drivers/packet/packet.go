@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"time"
 	"strings"
-	"os/exec"
 	"io/ioutil"
 	"path/filepath"
 
@@ -12,10 +11,10 @@ import (
 
 	"github.com/codegangsta/cli"
 	"github.com/packethost/packngo"
-	"github.com/docker/machine/drivers"
-	"github.com/docker/machine/provider"
 	"github.com/docker/machine/ssh"
 	"github.com/docker/machine/state"
+	"github.com/docker/machine/drivers"
+	"github.com/docker/machine/provider"
 )
 
 const (
@@ -28,7 +27,6 @@ func init() {
 		New:            NewDriver,
 		GetCreateFlags: GetCreateFlags,
 	})
-
 }
 
 func GetCreateFlags() []cli.Flag {
@@ -71,7 +69,7 @@ func GetCreateFlags() []cli.Flag {
 }
 
 func getOsFlavors() []string {
-	return []string{"centos_7", "centos_6", "coreos_stable", "coreos_beta", "debian_6", "debian_7", "ubuntu_12_04", "ubuntu_14_04"}
+	return []string{"centos_6", "centos_7", "debian_7", "ubuntu_12_04", "ubuntu_14_04", "coreos_stable", "coreos_beta"}
 }
 
 func NewDriver(machineName string, storePath string, caCert string, privateKey string) (drivers.Driver, error) {
@@ -196,8 +194,6 @@ func (d *Driver) Create() error {
 
 	d.SSHKeyID = key.ID
 
-	log.Infof("Provisioning Packet server...")
-
 	client := d.getClient()
 	createRequest := &packngo.DeviceCreateRequest{
 		Name:         d.MachineName,
@@ -210,10 +206,12 @@ func (d *Driver) Create() error {
 		//Tags:         d.Tags,
 	}
 
+	log.Infof("Provisioning Packet server...")
 	newDevice, _, err := client.Devices.Create(createRequest)
 	if err != nil {
 		return err
 	}
+	log.Infof("Provisioning Packet server 2...")
 	t0 := time.Now()
 
 	d.DeviceID = newDevice.ID
@@ -237,7 +235,7 @@ func (d *Driver) Create() error {
 		time.Sleep(1 * time.Second)
 	}
 
-	log.Debugf("Created device ID %d, IP address %s",
+	log.Debugf("Created device ID %s, IP address %s",
 		newDevice.ID,
 		d.IPAddress)
 
@@ -258,31 +256,25 @@ func (d *Driver) Create() error {
 		time.Sleep(10 * time.Second)
 	}
 
+  fmt.Printf("Provision time: %v.\n", time.Since(t0))
 
-/**
+	log.Debug("Waiting for SSH...")
 	if err := ssh.WaitForTCP(fmt.Sprintf("%s:%d", d.IPAddress, 22)); err != nil {
 		return err
 	}
 
-	log.Info("Configuring Machine...")
-
-	log.Debugf("Setting hostname: %s", d.MachineName)
-	cmd, err := d.GetSSHCommand(fmt.Sprintf(
-		"echo \"127.0.0.1 %s\" | sudo tee -a /etc/hosts && sudo hostname %s && echo \"%s\" | sudo tee /etc/hostname",
-		d.MachineName,
-		d.MachineName,
-		d.MachineName,
-	))
-
-	if err != nil {
-		return err
+	switch d.OperatingSystem {
+		case "centos_6":
+		case "centos_7":
+			cmd := ssh.GetSSHCommand(d.IPAddress, 22, d.SSHUser, d.sshKeyPath(), "yum -y install docker-io")
+			if err != nil {
+				return err
+			}
+			if err := cmd.Run(); err != nil {
+				return err
+			}
 	}
-	if err := cmd.Run(); err != nil {
-		return err
-	}
-**/
 
-  fmt.Printf("Provision time: %v.\n", time.Since(t0))
 	return nil
 }
 
@@ -377,90 +369,8 @@ func (d *Driver) Kill() error {
 	return err
 }
 
-func (d *Driver) StartDocker() error {
-	log.Debug("Starting Docker...")
-
-	// centos_6, debian_6, ubuntu_12
-	cmdstr := "service start docker"
-	switch {
-		case d.OperatingSystem == "coreos":
-			return nil
-		case d.OperatingSystem == "centos_7":
-			cmdstr = "systemctl stop docker"
-		case d.OperatingSystem == "debian_7":
-		case d.OperatingSystem == "ubuntu_14":
-			cmdstr = "sysctl start docker"
-	}
-
-	cmd, err := d.GetSSHCommand(cmdstr)
-	if err != nil {
-		return err
-	}
-	if err := cmd.Run(); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (d *Driver) StopDocker() error {
-	log.Debug("Stopping Docker...")
-
-	// centos_6, debian_6, ubuntu_12
-	cmdstr := "service stop docker"
-	switch {
-		case d.OperatingSystem == "coreos":
-			return nil
-		case d.OperatingSystem == "centos_7":
-			cmdstr = "systemctl stop docker"
-		case d.OperatingSystem == "debian_7":
-		case d.OperatingSystem == "ubuntu_14":
-			cmdstr = "sysctl start docker"
-	}
-
-	cmd, err := d.GetSSHCommand(cmdstr)
-	if err != nil {
-		return err
-	}
-	if err := cmd.Run(); err != nil {
-		return err
-	}
-
-	return nil
-}
-
 func (d *Driver) GetDockerConfigDir() string {
 	return dockerConfigDir
-}
-
-func (d *Driver) Upgrade() error {
-	log.Debugf("Upgrading Docker")
-
-	// debian_6, debian_7, ubuntu_12, ubuntu_14
-	cmdstr := "apt-get update && apt-get install -y --upgrade lxc-docker"
-	switch {
-		case d.OperatingSystem == "coreos":
-			return nil
-		case d.OperatingSystem == "centos_6":
-		case d.OperatingSystem == "centos_7":
-			cmdstr = "yum -y update && yum install -y docker"
-	}
-
-	cmd, err := d.GetSSHCommand(cmdstr)
-	if err != nil {
-		return err
-	}
-	if err := cmd.Run(); err != nil {
-		return err
-	}
-
-	return cmd.Run()
-	return nil
-}
-
-func (d *Driver) GetSSHCommand(args ...string) (*exec.Cmd, error) {
-	cmd := ssh.GetSSHCommand(d.IPAddress, 22, "root", d.sshKeyPath(), args...)
-	return cmd, nil
 }
 
 func (d *Driver) getClient() *packngo.Client {
