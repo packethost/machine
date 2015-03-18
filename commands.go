@@ -13,6 +13,7 @@ import (
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/codegangsta/cli"
+	"github.com/skarademir/naturalsort"
 
 	"github.com/docker/machine/drivers"
 	_ "github.com/docker/machine/drivers/amazonec2"
@@ -37,8 +38,11 @@ type machineConfig struct {
 	machineName    string
 	machineDir     string
 	caCertPath     string
+	caKeyPath      string
 	clientCertPath string
 	clientKeyPath  string
+	serverCertPath string
+	serverKeyPath  string
 	machineUrl     string
 	swarmMaster    bool
 	swarmHost      string
@@ -55,18 +59,37 @@ type hostListItem struct {
 	SwarmDiscovery string
 }
 
-type hostListItemByName []hostListItem
-
-func (h hostListItemByName) Len() int {
-	return len(h)
+func sortHostListItemsByName(items []hostListItem) {
+	m := make(map[string]hostListItem, len(items))
+	s := make([]string, len(items))
+	for i, v := range items {
+		name := strings.ToLower(v.Name)
+		m[name] = v
+		s[i] = name
+	}
+	sort.Sort(naturalsort.NaturalSort(s))
+	for i, v := range s {
+		items[i] = m[v]
+	}
 }
 
-func (h hostListItemByName) Swap(i, j int) {
-	h[i], h[j] = h[j], h[i]
-}
+func confirmInput(msg string) bool {
+	fmt.Printf("%s (y/n): ", msg)
+	var resp string
+	_, err := fmt.Scanln(&resp)
 
-func (h hostListItemByName) Less(i, j int) bool {
-	return strings.ToLower(h[i].Name) < strings.ToLower(h[j].Name)
+	if err != nil {
+		log.Fatal(err)
+
+	}
+
+	if strings.Index(strings.ToLower(resp), "y") == 0 {
+		return true
+
+	}
+
+	return false
+
 }
 
 func setupCertificates(caCertPath, caKeyPath, clientCertPath, clientKeyPath string) error {
@@ -209,6 +232,18 @@ var Commands = []cli.Command{
 		Action: cmdLs,
 	},
 	{
+		Name:        "regenerate-certs",
+		Usage:       "Regenerate TLS Certificates for a machine",
+		Description: "Argument(s) are one or more machine names.  Will use the active machine if none is provided.",
+		Action:      cmdRegenerateCerts,
+		Flags: []cli.Flag{
+			cli.BoolFlag{
+				Name:  "force, f",
+				Usage: "Force rebuild and do not prompt",
+			},
+		},
+	},
+	{
 		Name:        "restart",
 		Usage:       "Restart a machine",
 		Description: "Argument(s) are one or more machine names. Will use the active machine if none is provided.",
@@ -223,7 +258,7 @@ var Commands = []cli.Command{
 		},
 		Name:        "rm",
 		Usage:       "Remove a machine",
-		Description: "Argument(s) are one or more machine names. Will use the active machine if none is provided.",
+		Description: "Argument(s) are one or more machine names.",
 		Action:      cmdRm,
 	},
 	{
@@ -353,7 +388,12 @@ func cmdConfig(c *cli.Context) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	dockerHost := cfg.machineUrl
+
+	dockerHost, err := getHost(c).Driver.GetURL()
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	if c.Bool("swarm") {
 		if !cfg.swarmMaster {
 			log.Fatalf("%s is not a swarm master", cfg.machineName)
@@ -366,7 +406,7 @@ func cmdConfig(c *cli.Context) {
 		swarmPort := parts[1]
 
 		// get IP of machine to replace in case swarm host is 0.0.0.0
-		mUrl, err := url.Parse(cfg.machineUrl)
+		mUrl, err := url.Parse(dockerHost)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -375,7 +415,36 @@ func cmdConfig(c *cli.Context) {
 
 		dockerHost = fmt.Sprintf("tcp://%s:%s", machineIp, swarmPort)
 	}
-	fmt.Printf("--tlsverify --tlscacert=%s --tlscert=%s --tlskey=%s -H=%s",
+
+	log.Debug(dockerHost)
+
+	u, err := url.Parse(cfg.machineUrl)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if u.Scheme != "unix" {
+		// validate cert and regenerate if needed
+		valid, err := utils.ValidateCertificate(
+			u.Host,
+			cfg.caCertPath,
+			cfg.serverCertPath,
+			cfg.serverKeyPath,
+		)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		if !valid {
+			log.Debugf("invalid certs detected; regenerating for %s", u.Host)
+
+			if err := runActionWithContext("configureAuth", c); err != nil {
+				log.Fatal(err)
+			}
+		}
+	}
+
+	fmt.Printf("--tlsverify --tlscacert=%q --tlscert=%q --tlskey=%q -H=%s",
 		cfg.caCertPath, cfg.clientCertPath, cfg.clientKeyPath, dockerHost)
 }
 
@@ -442,7 +511,7 @@ func cmdLs(c *cli.Context) {
 
 	close(hostListItems)
 
-	sort.Sort(hostListItemByName(items))
+	sortHostListItemsByName(items)
 
 	for _, item := range items {
 		activeString := ""
@@ -463,6 +532,16 @@ func cmdLs(c *cli.Context) {
 	}
 
 	w.Flush()
+}
+
+func cmdRegenerateCerts(c *cli.Context) {
+	force := c.Bool("force")
+	if force || confirmInput("Regenerate TLS machine certs?  Warning: this is irreversible.") {
+		log.Infof("Regenerating TLS certificates")
+		if err := runActionWithContext("configureAuth", c); err != nil {
+			log.Fatal(err)
+		}
+	}
 }
 
 func cmdRm(c *cli.Context) {
@@ -527,12 +606,38 @@ func cmdEnv(c *cli.Context) {
 		dockerHost = fmt.Sprintf("tcp://%s:%s", machineIp, swarmPort)
 	}
 
+	u, err := url.Parse(cfg.machineUrl)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if u.Scheme != "unix" {
+		// validate cert and regenerate if needed
+		valid, err := utils.ValidateCertificate(
+			u.Host,
+			cfg.caCertPath,
+			cfg.serverCertPath,
+			cfg.serverKeyPath,
+		)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		if !valid {
+			log.Debugf("invalid certs detected; regenerating for %s", u.Host)
+
+			if err := runActionWithContext("configureAuth", c); err != nil {
+				log.Fatal(err)
+			}
+		}
+	}
+
 	switch userShell {
 	case "fish":
-		fmt.Printf("set -x DOCKER_TLS_VERIFY 1;\nset -x DOCKER_CERT_PATH %s;\nset -x DOCKER_HOST %s;\n",
+		fmt.Printf("set -x DOCKER_TLS_VERIFY 1;\nset -x DOCKER_CERT_PATH %q;\nset -x DOCKER_HOST %s;\n",
 			cfg.machineDir, dockerHost)
 	default:
-		fmt.Printf("export DOCKER_TLS_VERIFY=1\nexport DOCKER_CERT_PATH=%s\nexport DOCKER_HOST=%s\n",
+		fmt.Printf("export DOCKER_TLS_VERIFY=1\nexport DOCKER_CERT_PATH=%q\nexport DOCKER_HOST=%s\n",
 			cfg.machineDir, dockerHost)
 	}
 }
@@ -580,11 +685,12 @@ func cmdSsh(c *cli.Context) {
 // We run commands concurrently and communicate back an error if there was one.
 func machineCommand(actionName string, machine *Host, errorChan chan<- error) {
 	commands := map[string](func() error){
-		"start":   machine.Start,
-		"stop":    machine.Stop,
-		"restart": machine.Restart,
-		"kill":    machine.Kill,
-		"upgrade": machine.Upgrade,
+		"configureAuth": machine.ConfigureAuth,
+		"start":         machine.Start,
+		"stop":          machine.Stop,
+		"restart":       machine.Restart,
+		"kill":          machine.Kill,
+		"upgrade":       machine.Upgrade,
 	}
 
 	log.Debugf("command=%s machine=%s", actionName, machine.Name)
@@ -817,8 +923,11 @@ func getMachineConfig(c *cli.Context) (*machineConfig, error) {
 
 	machineDir := filepath.Join(utils.GetMachineDir(), machine.Name)
 	caCert := filepath.Join(machineDir, "ca.pem")
+	caKey := filepath.Join(utils.GetMachineCertDir(), "ca-key.pem")
 	clientCert := filepath.Join(machineDir, "cert.pem")
 	clientKey := filepath.Join(machineDir, "key.pem")
+	serverCert := filepath.Join(machineDir, "server.pem")
+	serverKey := filepath.Join(machineDir, "server-key.pem")
 	machineUrl, err := machine.GetURL()
 	if err != nil {
 		if err == drivers.ErrHostIsNotRunning {
@@ -831,8 +940,11 @@ func getMachineConfig(c *cli.Context) (*machineConfig, error) {
 		machineName:    name,
 		machineDir:     machineDir,
 		caCertPath:     caCert,
+		caKeyPath:      caKey,
 		clientCertPath: clientCert,
 		clientKeyPath:  clientKey,
+		serverCertPath: serverCert,
+		serverKeyPath:  serverKey,
 		machineUrl:     machineUrl,
 		swarmMaster:    machine.SwarmMaster,
 		swarmHost:      machine.SwarmHost,
