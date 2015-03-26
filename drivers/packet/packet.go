@@ -211,7 +211,6 @@ func (d *Driver) Create() error {
 	if err != nil {
 		return err
 	}
-	log.Infof("Provisioning Packet server 2...")
 	t0 := time.Now()
 
 	d.DeviceID = newDevice.ID
@@ -240,17 +239,18 @@ func (d *Driver) Create() error {
 		d.IPAddress)
 
 	log.Infof("Waiting for Provisioning...")
+	stage := float32(0)
 	for {
 		newDevice, _, err = client.Devices.Get(d.DeviceID)
 		if err != nil {
 			return err
 		}
-		if newDevice.State == "provisioning" {
+		if newDevice.State == "provisioning" && stage != newDevice.ProvisionPer {
+			stage = newDevice.ProvisionPer
 			log.Infof("Provisioning %v%% complete", newDevice.ProvisionPer)
-		} else {
-			log.Infof("Device State: %s", newDevice.State)
 		}
 		if newDevice.State == "active" {
+			log.Infof("Device State: %s", newDevice.State)
 			break
 		}
 		time.Sleep(10 * time.Second)
