@@ -69,7 +69,7 @@ func GetCreateFlags() []cli.Flag {
 }
 
 func getOsFlavors() []string {
-	return []string{"centos_6", "centos_7", "debian_7", "ubuntu_12_04", "ubuntu_14_04", "coreos_stable", "coreos_beta"}
+	return []string{"centos_7", "ubuntu_14_04"}
 }
 
 func NewDriver(machineName string, storePath string, caCert string, privateKey string) (drivers.Driver, error) {
@@ -86,6 +86,8 @@ type Driver struct {
 	BillingCycle    string
 	MachineName     string
 	DeviceID        string
+	UserData        string
+	Tags            []string
 	IPAddress       string
 	CaCertPath      string
 	PrivateKeyPath  string
@@ -202,8 +204,8 @@ func (d *Driver) Create() error {
 		OS:           d.OperatingSystem,
 		BillingCycle: d.BillingCycle,
 		ProjectId:    d.ProjectId,
-		//UserData:     d.UserData,
-		//Tags:         d.Tags,
+		UserData:     d.UserData,
+		Tags:         d.Tags,
 	}
 
 	log.Infof("Provisioning Packet server...")
@@ -234,7 +236,7 @@ func (d *Driver) Create() error {
 		time.Sleep(1 * time.Second)
 	}
 
-	log.Debugf("Created device ID %s, IP address %s",
+	log.Infof("Created device ID %s, IP address %s",
 		newDevice.ID,
 		d.IPAddress)
 
@@ -256,7 +258,7 @@ func (d *Driver) Create() error {
 		time.Sleep(10 * time.Second)
 	}
 
-  fmt.Printf("Provision time: %v.\n", time.Since(t0))
+  log.Infof("Provision time: %v.\n", time.Since(t0))
 
 	log.Debug("Waiting for SSH...")
 	if err := ssh.WaitForTCP(fmt.Sprintf("%s:%d", d.IPAddress, 22)); err != nil {
@@ -264,9 +266,16 @@ func (d *Driver) Create() error {
 	}
 
 	switch d.OperatingSystem {
-		case "centos_6":
+		case "ubuntu_14_04":
+			cmd := ssh.GetSSHCommand(d.IPAddress, 22, d.SSHUser, d.sshKeyPath(), "aptitude -y update")
+			if err != nil {
+				return err
+			}
+			if err := cmd.Run(); err != nil {
+				return err
+			}
 		case "centos_7":
-			cmd := ssh.GetSSHCommand(d.IPAddress, 22, d.SSHUser, d.sshKeyPath(), "yum -y install docker-io")
+			cmd := ssh.GetSSHCommand(d.IPAddress, 22, d.SSHUser, d.sshKeyPath(), "yum -y update")
 			if err != nil {
 				return err
 			}
