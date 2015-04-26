@@ -16,13 +16,11 @@ import (
 	"github.com/docker/machine/state"
 )
 
-const (
-	dockerConfigDir = "/etc/docker"
-)
-
 type Driver struct {
 	AuthUrl          string
 	Insecure         bool
+	DomainID         string
+	DomainName       string
 	Username         string
 	Password         string
 	TenantName       string
@@ -71,6 +69,18 @@ func GetCreateFlags() []cli.Flag {
 		cli.BoolFlag{
 			Name:  "openstack-insecure",
 			Usage: "Disable TLS credential checking.",
+		},
+		cli.StringFlag{
+			EnvVar: "OS_DOMAIN_ID",
+			Name:   "openstack-domain-id",
+			Usage:  "OpenStack domain ID (identity v3 only)",
+			Value:  "",
+		},
+		cli.StringFlag{
+			EnvVar: "OS_DOMAIN_NAME",
+			Name:   "openstack-domain-name",
+			Usage:  "OpenStack domain name (identity v3 only)",
+			Value:  "",
 		},
 		cli.StringFlag{
 			EnvVar: "OS_USERNAME",
@@ -229,6 +239,8 @@ func (d *Driver) DriverName() string {
 func (d *Driver) SetConfigFromFlags(flags drivers.DriverOptions) error {
 	d.AuthUrl = flags.String("openstack-auth-url")
 	d.Insecure = flags.Bool("openstack-insecure")
+	d.DomainID = flags.String("openstack-domain-id")
+	d.DomainName = flags.String("openstack-domain-name")
 	d.Username = flags.String("openstack-username")
 	d.Password = flags.String("openstack-password")
 	d.TenantName = flags.String("openstack-tenant-name")
@@ -357,9 +369,6 @@ func (d *Driver) Create() error {
 	if err := d.lookForIpAddress(); err != nil {
 		return err
 	}
-	if err := d.waitForSSHServer(); err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -371,7 +380,7 @@ func (d *Driver) Start() error {
 	if err := d.client.StartInstance(d); err != nil {
 		return err
 	}
-	return d.waitForInstanceToStart()
+	return nil
 }
 
 func (d *Driver) Stop() error {
@@ -383,10 +392,6 @@ func (d *Driver) Stop() error {
 		return err
 	}
 
-	log.WithField("MachineId", d.MachineId).Info("Waiting for the OpenStack instance to stop...")
-	if err := d.client.WaitForInstanceStatus(d, "SHUTOFF", 200); err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -414,7 +419,7 @@ func (d *Driver) Restart() error {
 	if err := d.client.RestartInstance(d); err != nil {
 		return err
 	}
-	return d.waitForInstanceToStart()
+	return nil
 }
 
 func (d *Driver) Kill() error {
@@ -681,25 +686,6 @@ func (d *Driver) lookForIpAddress() error {
 		"MachineId": d.MachineId,
 	}).Debug("IP address found")
 	return nil
-}
-
-func (d *Driver) waitForSSHServer() error {
-	ip, err := d.GetIP()
-	if err != nil {
-		return err
-	}
-	log.WithFields(log.Fields{
-		"MachineId": d.MachineId,
-		"IP":        ip,
-	}).Debug("Waiting for the SSH server to be started...")
-	return ssh.WaitForTCP(fmt.Sprintf("%s:%d", ip, d.SSHPort))
-}
-
-func (d *Driver) waitForInstanceToStart() error {
-	if err := d.waitForInstanceActive(); err != nil {
-		return err
-	}
-	return d.waitForSSHServer()
 }
 
 func (d *Driver) publicSSHKeyPath() string {

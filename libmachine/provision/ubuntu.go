@@ -3,12 +3,14 @@ package provision
 import (
 	"bytes"
 	"fmt"
-	"os/exec"
 
+	log "github.com/Sirupsen/logrus"
 	"github.com/docker/machine/drivers"
 	"github.com/docker/machine/libmachine/auth"
 	"github.com/docker/machine/libmachine/provision/pkgaction"
 	"github.com/docker/machine/libmachine/swarm"
+	"github.com/docker/machine/ssh"
+	"github.com/docker/machine/utils"
 )
 
 func init() {
@@ -36,12 +38,7 @@ type UbuntuProvisioner struct {
 func (provisioner *UbuntuProvisioner) Service(name string, action pkgaction.ServiceAction) error {
 	command := fmt.Sprintf("sudo service %s %s", name, action.String())
 
-	cmd, err := provisioner.SSHCommand(command)
-	if err != nil {
-		return err
-	}
-
-	if err := cmd.Run(); err != nil {
+	if _, err := provisioner.SSHCommand(command); err != nil {
 		return err
 	}
 
@@ -68,16 +65,21 @@ func (provisioner *UbuntuProvisioner) Package(name string, action pkgaction.Pack
 
 	command := fmt.Sprintf("DEBIAN_FRONTEND=noninteractive sudo -E apt-get %s -y  %s", packageAction, name)
 
-	cmd, err := provisioner.SSHCommand(command)
-	if err != nil {
-		return err
-	}
-
-	if err := cmd.Run(); err != nil {
+	if _, err := provisioner.SSHCommand(command); err != nil {
 		return err
 	}
 
 	return nil
+}
+
+func (provisioner *UbuntuProvisioner) dockerDaemonResponding() bool {
+	if _, err := provisioner.SSHCommand("sudo docker version"); err != nil {
+		log.Warn("Error getting SSH command to check if the daemon is up: %s", err)
+		return false
+	}
+
+	// The daemon is up if the command worked.  Carry on.
+	return true
 }
 
 func (provisioner *UbuntuProvisioner) Provision(swarmOptions swarm.SwarmOptions, authOptions auth.AuthOptions) error {
@@ -95,6 +97,10 @@ func (provisioner *UbuntuProvisioner) Provision(swarmOptions swarm.SwarmOptions,
 		return err
 	}
 
+	if err := utils.WaitFor(provisioner.dockerDaemonResponding); err != nil {
+		return err
+	}
+
 	if err := ConfigureAuth(provisioner, authOptions); err != nil {
 		return err
 	}
@@ -107,15 +113,13 @@ func (provisioner *UbuntuProvisioner) Provision(swarmOptions swarm.SwarmOptions,
 }
 
 func (provisioner *UbuntuProvisioner) Hostname() (string, error) {
-	cmd, err := provisioner.SSHCommand("hostname")
+	output, err := provisioner.SSHCommand("hostname")
 	if err != nil {
 		return "", err
 	}
 
 	var so bytes.Buffer
-	cmd.Stdout = &so
-
-	if err := cmd.Run(); err != nil {
+	if _, err := so.ReadFrom(output.Stdout); err != nil {
 		return "", err
 	}
 
@@ -123,26 +127,24 @@ func (provisioner *UbuntuProvisioner) Hostname() (string, error) {
 }
 
 func (provisioner *UbuntuProvisioner) SetHostname(hostname string) error {
-	cmd, err := provisioner.SSHCommand(fmt.Sprintf(
+	if _, err := provisioner.SSHCommand(fmt.Sprintf(
 		"sudo hostname %s && echo %q | sudo tee /etc/hostname && echo \"127.0.0.1 %s\" | sudo tee -a /etc/hosts",
 		hostname,
 		hostname,
 		hostname,
-	))
-
-	if err != nil {
+	)); err != nil {
 		return err
 	}
 
-	return cmd.Run()
+	return nil
 }
 
 func (provisioner *UbuntuProvisioner) GetDockerOptionsDir() string {
 	return "/etc/docker"
 }
 
-func (provisioner *UbuntuProvisioner) SSHCommand(args ...string) (*exec.Cmd, error) {
-	return drivers.GetSSHCommandFromDriver(provisioner.Driver, args...)
+func (provisioner *UbuntuProvisioner) SSHCommand(args string) (ssh.Output, error) {
+	return drivers.RunSSHCommandFromDriver(provisioner.Driver, args)
 }
 
 func (provisioner *UbuntuProvisioner) CompatibleWithHost() bool {

@@ -18,10 +18,6 @@ import (
 	"github.com/docker/machine/utils"
 )
 
-const (
-	dockerConfigDir = "/var/lib/boot2docker"
-)
-
 type Driver struct {
 	SSHUser        string
 	SSHPort        int
@@ -327,12 +323,7 @@ func (d *Driver) wait() error {
 		}
 		time.Sleep(1 * time.Second)
 	}
-	log.Infof("Got IP, waiting for SSH")
-	ip, err := d.GetIP()
-	if err != nil {
-		return err
-	}
-	return ssh.WaitForTCP(fmt.Sprintf("%s:22", ip))
+	return nil
 }
 
 func (d *Driver) Start() error {
