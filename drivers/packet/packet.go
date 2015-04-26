@@ -45,7 +45,7 @@ func GetCreateFlags() []cli.Flag {
 			EnvVar: "PACKET_OS",
 			Name:   "packet-os",
 			Usage:  fmt.Sprintf("Packet OS, possible values are: %v", strings.Join(getOsFlavors(), ", ")),
-			Value:  "centos_7",
+			Value:  "ubuntu_14_04",
 		},
 		cli.StringFlag {
 			EnvVar: "PACKET_FACILITY_CODE",
@@ -69,7 +69,7 @@ func GetCreateFlags() []cli.Flag {
 }
 
 func getOsFlavors() []string {
-	return []string{"centos_7", "ubuntu_14_04"}
+	return []string{"ubuntu_14_04"}
 }
 
 func NewDriver(machineName string, storePath string, caCert string, privateKey string) (drivers.Driver, error) {
@@ -267,19 +267,13 @@ func (d *Driver) Create() error {
 
 	switch d.OperatingSystem {
 		case "ubuntu_14_04":
-			cmd := ssh.GetSSHCommand(d.IPAddress, 22, d.SSHUser, d.sshKeyPath(), "aptitude -y update")
+			_, err := drivers.RunSSHCommandFromDriver(d, "aptitude -y update")
 			if err != nil {
-				return err
-			}
-			if err := cmd.Run(); err != nil {
 				return err
 			}
 		case "centos_7":
-			cmd := ssh.GetSSHCommand(d.IPAddress, 22, d.SSHUser, d.sshKeyPath(), "yum -y update")
+			_, err := drivers.RunSSHCommandFromDriver(d, "yum -y update")
 			if err != nil {
-				return err
-			}
-			if err := cmd.Run(); err != nil {
 				return err
 			}
 	}
