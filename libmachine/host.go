@@ -8,13 +8,13 @@ import (
 	"path/filepath"
 	"regexp"
 
-	log "github.com/Sirupsen/logrus"
 	"github.com/docker/machine/drivers"
 	"github.com/docker/machine/libmachine/auth"
 	"github.com/docker/machine/libmachine/engine"
 	"github.com/docker/machine/libmachine/provision"
 	"github.com/docker/machine/libmachine/provision/pkgaction"
 	"github.com/docker/machine/libmachine/swarm"
+	"github.com/docker/machine/log"
 	"github.com/docker/machine/ssh"
 	"github.com/docker/machine/state"
 	"github.com/docker/machine/utils"
@@ -118,7 +118,7 @@ func (h *Host) Create(name string) error {
 			return err
 		}
 
-		if err := provisioner.Provision(*h.HostOptions.SwarmOptions, *h.HostOptions.AuthOptions); err != nil {
+		if err := provisioner.Provision(*h.HostOptions.SwarmOptions, *h.HostOptions.AuthOptions, *h.HostOptions.EngineOptions); err != nil {
 			return err
 		}
 	}
@@ -315,7 +315,7 @@ func (h *Host) ConfigureAuth() error {
 		return err
 	}
 
-	if err := provision.ConfigureAuth(provisioner, *h.HostOptions.AuthOptions); err != nil {
+	if err := provision.ConfigureAuth(provisioner); err != nil {
 		return err
 	}
 

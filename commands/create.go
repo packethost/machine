@@ -2,10 +2,9 @@ package commands
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 
-	log "github.com/Sirupsen/logrus"
+	"github.com/docker/machine/log"
 
 	"github.com/codegangsta/cli"
 	"github.com/docker/machine/drivers"
@@ -69,7 +68,14 @@ func cmdCreate(c *cli.Context) {
 			ServerCertPath: filepath.Join(utils.GetMachineDir(), name, "server.pem"),
 			ServerKeyPath:  filepath.Join(utils.GetMachineDir(), name, "server-key.pem"),
 		},
-		EngineOptions: &engine.EngineOptions{},
+		EngineOptions: &engine.EngineOptions{
+			ArbitraryFlags:   c.StringSlice("engine-flag"),
+			InsecureRegistry: c.StringSlice("engine-insecure-registry"),
+			Labels:           c.StringSlice("engine-label"),
+			RegistryMirror:   c.StringSlice("engine-registry-mirror"),
+			StorageDriver:    c.String("engine-storage-driver"),
+			TlsVerify:        true,
+		},
 		SwarmOptions: &swarm.SwarmOptions{
 			IsSwarm:   c.Bool("swarm"),
 			Master:    c.Bool("swarm-master"),
@@ -89,21 +95,8 @@ func cmdCreate(c *cli.Context) {
 		log.Fatalf("error setting active host: %v", err)
 	}
 
-	info := ""
-	userShell := filepath.Base(os.Getenv("SHELL"))
-
-	switch userShell {
-	case "fish":
-		info = fmt.Sprintf("%s env %s | source", c.App.Name, name)
-	default:
-		info = fmt.Sprintf(`eval "$(%s env %s)"`, c.App.Name, name)
-	}
-
-	log.Infof("%q has been created and is now the active machine.", name)
-
-	if info != "" {
-		log.Infof("To point your Docker client at it, run this in your shell: %s", info)
-	}
+	info := fmt.Sprintf("%s env %s", c.App.Name, name)
+	log.Infof("To point your Docker client at it, run this in your shell: %s", info)
 }
 
 // If the user has specified a driver, they should not see the flags for all

@@ -1,13 +1,14 @@
 package commands
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 
-	log "github.com/Sirupsen/logrus"
 	"github.com/codegangsta/cli"
 	"github.com/skarademir/naturalsort"
 
@@ -30,8 +31,13 @@ import (
 	"github.com/docker/machine/libmachine"
 	"github.com/docker/machine/libmachine/auth"
 	"github.com/docker/machine/libmachine/swarm"
+	"github.com/docker/machine/log"
 	"github.com/docker/machine/state"
 	"github.com/docker/machine/utils"
+)
+
+var (
+	ErrUnknownShell = errors.New("unknown shell")
 )
 
 type machineConfig struct {
@@ -167,6 +173,31 @@ var sharedCreateFlags = []cli.Flag{
 		),
 		Value: "none",
 	},
+	cli.StringSliceFlag{
+		Name:  "engine-flag",
+		Usage: "Specify arbitrary flags to include with the created engine in the form flag=value",
+		Value: &cli.StringSlice{},
+	},
+	cli.StringSliceFlag{
+		Name:  "engine-insecure-registry",
+		Usage: "Specify insecure registries to allow with the created engine",
+		Value: &cli.StringSlice{},
+	},
+	cli.StringSliceFlag{
+		Name:  "engine-registry-mirror",
+		Usage: "Specify registry mirrors to use",
+		Value: &cli.StringSlice{},
+	},
+	cli.StringSliceFlag{
+		Name:  "engine-label",
+		Usage: "Specify labels for the created engine",
+		Value: &cli.StringSlice{},
+	},
+	cli.StringFlag{
+		Name:  "engine-storage-driver",
+		Usage: "Specify a storage driver to use with the engine",
+		Value: "aufs",
+	},
 	cli.BoolFlag{
 		Name:  "swarm",
 		Usage: "Configure Machine with Swarm",
@@ -199,6 +230,18 @@ var Commands = []cli.Command{
 		Action: cmdActive,
 	},
 	{
+		Name:        "config",
+		Usage:       "Print the connection config for machine",
+		Description: "Argument is a machine name. Will use the active machine if none is provided.",
+		Action:      cmdConfig,
+		Flags: []cli.Flag{
+			cli.BoolFlag{
+				Name:  "swarm",
+				Usage: "Display the Swarm config instead of the Docker daemon",
+			},
+		},
+	},
+	{
 		Flags: append(
 			drivers.GetCreateFlags(),
 			sharedCreateFlags...,
@@ -208,14 +251,22 @@ var Commands = []cli.Command{
 		Action: cmdCreate,
 	},
 	{
-		Name:        "config",
-		Usage:       "Print the connection config for machine",
+		Name:        "env",
+		Usage:       "Display the commands to set up the environment for the Docker client",
 		Description: "Argument is a machine name. Will use the active machine if none is provided.",
-		Action:      cmdConfig,
+		Action:      cmdEnv,
 		Flags: []cli.Flag{
 			cli.BoolFlag{
 				Name:  "swarm",
 				Usage: "Display the Swarm config instead of the Docker daemon",
+			},
+			cli.StringFlag{
+				Name:  "shell",
+				Usage: "Force environment to be configured for specified shell",
+			},
+			cli.BoolFlag{
+				Name:  "unset, u",
+				Usage: "Unset variables instead of setting them",
 			},
 		},
 	},
@@ -284,22 +335,6 @@ var Commands = []cli.Command{
 		Usage:       "Remove a machine",
 		Description: "Argument(s) are one or more machine names.",
 		Action:      cmdRm,
-	},
-	{
-		Name:        "env",
-		Usage:       "Display the commands to set up the environment for the Docker client",
-		Description: "Argument is a machine name. Will use the active machine if none is provided.",
-		Action:      cmdEnv,
-		Flags: []cli.Flag{
-			cli.BoolFlag{
-				Name:  "swarm",
-				Usage: "Display the Swarm config instead of the Docker daemon",
-			},
-			cli.BoolFlag{
-				Name:  "unset, u",
-				Usage: "Unset variables instead of setting them",
-			},
-		},
 	},
 	{
 		Name:        "ssh",
@@ -644,4 +679,20 @@ func getCertPathInfo(c *cli.Context) libmachine.CertPathInfo {
 		ClientCertPath: clientCertPath,
 		ClientKeyPath:  clientKeyPath,
 	}
+}
+
+func detectShell() (string, error) {
+	// attempt to get the SHELL env var
+	shell := filepath.Base(os.Getenv("SHELL"))
+	// none detected; check for windows env
+	if runtime.GOOS == "windows" {
+		log.Printf("On Windows, please specify either 'cmd' or 'powershell' with the --shell flag.\n\n")
+		return "", ErrUnknownShell
+	}
+
+	if shell == "" {
+		return "", ErrUnknownShell
+	}
+
+	return shell, nil
 }
