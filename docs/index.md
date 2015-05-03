@@ -142,7 +142,7 @@ INFO[0012] Creating VirtualBox VM...
 INFO[0019] Starting VirtualBox VM...
 INFO[0020] Waiting for VM to start...
 INFO[0053] "dev" has been created and is now the active machine.
-INFO[0053] To point your Docker client at it, run this in your shell: eval "$(docker-machine env dev)"
+INFO[0053] To see how to connect Docker to this machine, run: docker-machine env dev"
 ```
 
 You can see the machine you have created by running the `docker-machine ls` command
@@ -156,6 +156,7 @@ dev    *        virtualbox   Running   tcp://192.168.99.100:2376
 
 The `*` next to `dev` indicates that it is the active host.
 
+
 Next, as noted in the output of the `docker-machine create` command, we have to tell
 Docker to talk to that machine.  You can do this with the `docker-machine env`
 command.  For example,
@@ -164,6 +165,11 @@ command.  For example,
 $ eval "$(docker-machine env dev)"
 $ docker ps
 ```
+
+> **Note**: If you are using `fish`, or a Windows shell such as
+> Powershell/`cmd.exe` the above method will not work as described.  Instead,
+> see [the `env` command's documentation](https://docs.docker.com/machine/#env)
+> to learn how to set the environment variables for your shell.
 
 This will set environment variables that the Docker client will read which specify
 the TLS settings. Note that you will need to do that every time you open a new tab or
@@ -301,7 +307,7 @@ INFO[0000] Creating SSH key...
 INFO[0000] Creating Digital Ocean droplet...
 INFO[0002] Waiting for SSH...
 INFO[0085] "staging" has been created and is now the active machine
-INFO[0085] To point your Docker client at it, run this in your shell: eval "$(docker-machine env staging)"
+INFO[0085] To see how to connect Docker to this machine, run: docker-machine env staging"
 ```
 
 For convenience, `docker-machine` will use sensible defaults for choosing
@@ -384,6 +390,7 @@ Load the Machine configuration into your shell:
 ```
 $ eval "$(docker-machine env local)"
 ```
+
 Then run generate the token using the Swarm Docker image:
 
 ```
@@ -477,7 +484,7 @@ INFO[0000] Creating VirtualBox VM...
 INFO[0007] Starting VirtualBox VM...
 INFO[0007] Waiting for VM to start...
 INFO[0038] "dev" has been created and is now the active machine.
-INFO[0038] To point your Docker client at it, run this in your shell: eval "$(docker-machine env dev)"
+INFO[0038] To see how to connect Docker to this machine, run: docker-machine env dev"
 ```
 
 ##### Specifying configuration options for the created Docker engine
@@ -574,8 +581,8 @@ Set environment variables to dictate that `docker` should run a command against
 a particular machine.
 
 `docker-machine env machinename` will print out `export` commands which can be
-run in a subshell.  Running `docker-machine env -u` will print
-`unset` commands which reverse this effect.
+run in a subshell.  Running `docker-machine env -u` will print `unset` commands
+which reverse this effect.
 
 ```
 $ env | grep DOCKER
@@ -590,9 +597,75 @@ $ env | grep DOCKER
 $ # The environment variables have been unset.
 ```
 
+The output described above is intended for the shells `bash` and `zsh` (if
+you're not sure which shell you're using, there's a very good possibility that
+it's `bash`).  However, these are not the only shells which Docker Machine
+supports.
+
+If you are using `fish` and the `SHELL` environment variable is correctly set to
+the path where `fish` is located, `docker-machine env name` will print out the
+values in the format which `fish` expects:
+
+```
+set -x DOCKER_TLS_VERIFY 1;
+set -x DOCKER_CERT_PATH "/Users/nathanleclaire/.docker/machine/machines/overlay";
+set -x DOCKER_HOST tcp://192.168.99.102:2376;
+# Run this command to configure your shell: eval (docker-machine env overlay)
+```
+
+If you are on Windows and using Powershell or `cmd.exe`, `docker-machine env`
+cannot detect your shell automatically, but it does have support for these
+shells.  In order to use them, specify which shell you would like to print the
+options for using the `--shell` flag for `docker-machine env`.
+
+For Powershell:
+
+```
+$ docker-machine.exe env --shell powershell dev
+$Env:DOCKER_TLS_VERIFY = "1"
+$Env:DOCKER_HOST = "tcp://192.168.99.101:2376"
+$Env:DOCKER_CERT_PATH = "C:\Users\captain\.docker\machine\machines\dev"
+# Run this command to configure your shell: docker-machine.exe env --shell=powershell | Invoke-Expression
+```
+
+For `cmd.exe`:
+
+```
+$ docker-machine.exe env --shell cmd dev
+set DOCKER_TLS_VERIFY=1
+set DOCKER_HOST=tcp://192.168.99.101:2376
+set DOCKER_CERT_PATH=C:\Users\captain\.docker\machine\machines\dev
+# Run this command to configure your shell: copy and paste the above values into your command prompt
+```
+
 #### inspect
 
-Inspect information about a machine.
+```
+Usage: docker-machine inspect [OPTIONS] [arg...]
+
+Inspect information about a machine
+
+Description:
+   Argument is a machine name. Will use the active machine if none is provided.
+
+Options:
+   --format, -f 	Format the output using the given go template.
+```
+
+By default, this will render information about a machine as JSON. If a format is
+specified, the given template will be executed for each result.
+
+Go's [text/template](http://golang.org/pkg/text/template/) package
+describes all the details of the format.
+
+In addition to the `text/template` syntax, there are some additional functions,
+`json` and `prettyjson`, which can be used to format the output as JSON (documented below).
+
+##### Examples
+
+**List all the details of a machine:**
+
+This is the default usage of `inspect`.
 
 ```
 $ docker-machine inspect dev
@@ -603,8 +676,54 @@ $ docker-machine inspect dev
         "SSHPort": 55834,
         "Memory": 1024,
         "DiskSize": 20000,
-        "Boot2DockerURL": ""
-    }
+        "Boot2DockerURL": "",
+        "IPAddress": "192.168.5.99"
+    },
+    ...
+}
+```
+
+**Get a machine's IP address:**
+
+For the most part, you can pick out any field from the JSON in a fairly
+straightforward manner.
+
+```
+$ docker-machine inspect --format='{{.Driver.IPAddress}}' dev
+192.168.5.99
+```
+
+**Formatting details:**
+
+If you want a subset of information formatted as JSON, you can use the `json`
+function in the template.
+
+```
+$ docker-machine inspect --format='{{json .Driver}}' dev-fusion
+{"Boot2DockerURL":"","CPUS":8,"CPUs":8,"CaCertPath":"/Users/hairyhenderson/.docker/machine/certs/ca.pem","DiskSize":20000,"IPAddress":"172.16.62.129","ISO":"/Users/hairyhenderson/.docker/machine/machines/dev-fusion/boot2docker-1.5.0-GH747.iso","MachineName":"dev-fusion","Memory":1024,"PrivateKeyPath":"/Users/hairyhenderson/.docker/machine/certs/ca-key.pem","SSHPort":22,"SSHUser":"docker","SwarmDiscovery":"","SwarmHost":"tcp://0.0.0.0:3376","SwarmMaster":false}
+```
+
+While this is usable, it's not very human-readable. For this reason, there is
+`prettyjson`:
+
+```
+$ docker-machine inspect --format='{{prettyjson .Driver}}' dev-fusion
+{
+    "Boot2DockerURL": "",
+    "CPUS": 8,
+    "CPUs": 8,
+    "CaCertPath": "/Users/hairyhenderson/.docker/machine/certs/ca.pem",
+    "DiskSize": 20000,
+    "IPAddress": "172.16.62.129",
+    "ISO": "/Users/hairyhenderson/.docker/machine/machines/dev-fusion/boot2docker-1.5.0-GH747.iso",
+    "MachineName": "dev-fusion",
+    "Memory": 1024,
+    "PrivateKeyPath": "/Users/hairyhenderson/.docker/machine/certs/ca-key.pem",
+    "SSHPort": 22,
+    "SSHUser": "docker",
+    "SwarmDiscovery": "",
+    "SwarmHost": "tcp://0.0.0.0:3376",
+    "SwarmMaster": false
 }
 ```
 
@@ -807,7 +926,7 @@ Create machines on [Amazon Web Services](http://aws.amazon.com).  You will need 
 Options:
 
  - `--amazonec2-access-key`: **required** Your access key id for the Amazon Web Services API.
- - `--amazonec2-ami`: The AMI ID of the instance to use  Default: `ami-4ae27e22`
+ - `--amazonec2-ami`: The AMI ID of the instance to use  Default: `ami-cc3b3ea4`
  - `--amazonec2-instance-type`: The instance type to run.  Default: `t2.micro`
  - `--amazonec2-iam-instance-profile`: The AWS IAM role name to be used as the instance profile
  - `--amazonec2-region`: The region to use when launching the instance.  Default: `us-east-1`
@@ -824,17 +943,17 @@ By default, the Amazon EC2 driver will use a daily image of Ubuntu 14.04 LTS.
 
 | Region        | AMI ID     |
 |:--------------|:-----------|
-|ap-northeast-1 |ami-44f1e245|
-|ap-southeast-1 |ami-f95875ab|
-|ap-southeast-2 |ami-890b62b3|
-|cn-north-1     |ami-fe7ae8c7|
-|eu-west-1      |ami-823686f5|
-|eu-central-1   |ami-ac1524b1|
-|sa-east-1      |ami-c770c1da|
-|us-east-1      |ami-4ae27e22|
-|us-west-1      |ami-d1180894|
-|us-west-2      |ami-898dd9b9|
-|us-gov-west-1  |ami-cf5630ec|
+|ap-northeast-1 |ami-fc11d4fc|
+|ap-southeast-1 |ami-7854692a|
+|ap-southeast-2 |ami-c5611cff|
+|cn-north-1     |ami-7cd84545|
+|eu-west-1      |ami-2d96f65a|
+|eu-central-1   |ami-3cdae621|
+|sa-east-1      |ami-71b2376c|
+|us-east-1      |ami-cc3b3ea4|
+|us-west-1      |ami-017f9d45|
+|us-west-2      |ami-55526765|
+|us-gov-west-1  |ami-8ffa9bac|
 
 #### Digital Ocean
 
@@ -867,10 +986,13 @@ Options:
  - `--google-zone`: The zone to launch the instance.  Default: `us-central1-a`
  - `--google-machine-type`: The type of instance.  Default: `f1-micro`
  - `--google-username`: The username to use for the instance.  Default: `docker-user`
- - `--google-instance-name`: The name of the instance.  Default: `docker-machine`
  - `--google-project`: The name of your project to use when launching the instance.
-
-The GCE driver will use the `ubuntu-1404-trusty-v20150128` instance type unless otherwise specified.
+ - `--google-auth-token`: Your oAuth token for the Google Cloud API.
+ - `--google-scopes`: The scopes for OAuth 2.0 to Access Google APIs. See [Google Compute Engine Doc](https://cloud.google.com/storage/docs/authentication).
+ - `--google-disk-size`: The disk size of instance. Default: `10`
+ - `--google-disk-type`: The disk type of instance. Default: `pd-standard`
+ 
+The GCE driver will use the `ubuntu-1404-trusty-v20150316` instance type unless otherwise specified.
 
 #### IBM Softlayer
 
@@ -1119,6 +1241,21 @@ Options:
  - `--vmwarevsphere-vcenter`: IP/hostname for vCenter (or ESXi if connecting directly to a single host).
 
 The VMware vSphere driver uses the latest boot2docker image.
+
+#### exoscale
+Create machines on [exoscale](https://www.exoscale.ch/).
+
+Get your API key and API secret key from [API details](https://portal.exoscale.ch/account/api) and pass them to `machine create` with the `--exoscale-api-key` and `--exoscale-api-secret-key` options.
+
+Options:
+
+ - `--exoscale-api-key`: Your API key.
+ - `--exoscale-api-secret-key`: Your API secret key.
+ - `--exoscale-instance-profile`: Instance profile. Default: `small`.
+ - `--exoscale-disk-size`: Disk size for the host in GB. Default: `50`.
+ - `--exoscale-security-group`: Security group. It will be created if it doesn't exist. Default: `docker-machine`.
+
+If a custom security group is provided, you need to ensure that you allow TCP port 2376 in an ingress rule.
 
 ## Release Notes
 
