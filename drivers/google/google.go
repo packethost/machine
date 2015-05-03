@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"path/filepath"
 
-	log "github.com/Sirupsen/logrus"
 	"github.com/codegangsta/cli"
 	"github.com/docker/machine/drivers"
+	"github.com/docker/machine/log"
 	"github.com/docker/machine/provider"
 	"github.com/docker/machine/ssh"
 	"github.com/docker/machine/state"
@@ -14,11 +14,13 @@ import (
 
 // Driver is a struct compatible with the docker.hosts.drivers.Driver interface.
 type Driver struct {
+	IPAddress      string
 	MachineName    string
 	SSHUser        string
 	SSHPort        int
 	Zone           string
 	MachineType    string
+	DiskType       string
 	Scopes         string
 	DiskSize       int
 	AuthTokenPath  string
@@ -81,6 +83,12 @@ func GetCreateFlags() []cli.Flag {
 			Usage:  "GCE Instance Disk Size (in GB)",
 			Value:  10,
 			EnvVar: "GOOGLE_DISK_SIZE",
+		},
+		cli.StringFlag{
+			Name:   "google-disk-type",
+			Usage:  "GCE Instance Disk type",
+			Value:  "pd-standard",
+			EnvVar: "GOOGLE_DISK_TYPE",
 		},
 	}
 }
@@ -145,6 +153,7 @@ func (d *Driver) SetConfigFromFlags(flags drivers.DriverOptions) error {
 	d.Zone = flags.String("google-zone")
 	d.MachineType = flags.String("google-machine-type")
 	d.DiskSize = flags.Int("google-disk-size")
+	d.DiskType = flags.String("google-disk-type")
 	d.AuthTokenPath = flags.String("google-auth-token")
 	d.Project = flags.String("google-project")
 	d.Scopes = flags.String("google-scopes")
@@ -242,7 +251,11 @@ func (d *Driver) Start() error {
 	if err != nil {
 		return err
 	}
-	return c.createInstance(d)
+	if err = c.createInstance(d); err != nil {
+		return err
+	}
+	d.IPAddress, err = d.GetIP()
+	return err
 }
 
 // Stop deletes the GCE instance, but keeps the disk.
@@ -251,7 +264,11 @@ func (d *Driver) Stop() error {
 	if err != nil {
 		return err
 	}
-	return c.deleteInstance()
+	if err = c.deleteInstance(); err != nil {
+		return err
+	}
+	d.IPAddress = ""
+	return nil
 }
 
 // Remove deletes the GCE instance and the disk.
