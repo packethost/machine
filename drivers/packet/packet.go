@@ -69,7 +69,7 @@ func GetCreateFlags() []cli.Flag {
 }
 
 func getOsFlavors() []string {
-	return []string{"ubuntu_14_04"}
+	return []string{"ubuntu_14_04", "centos_7"}
 }
 
 func NewDriver(machineName string, storePath string, caCert string, privateKey string) (drivers.Driver, error) {
@@ -260,7 +260,7 @@ func (d *Driver) Create() error {
 
   log.Infof("Provision time: %v.\n", time.Since(t0))
 
-	log.Debug("Waiting for SSH...")
+	log.Infof("Waiting for SSH...")
 	if err := ssh.WaitForTCP(fmt.Sprintf("%s:%d", d.IPAddress, 22)); err != nil {
 		return err
 	}
@@ -272,10 +272,10 @@ func (d *Driver) Create() error {
 				return err
 			}
 		case "centos_7":
-			_, err := drivers.RunSSHCommandFromDriver(d, "yum -y update")
-			if err != nil {
-				return err
-			}
+//			_, err := drivers.RunSSHCommandFromDriver(d, "yum -y update")
+//			if err != nil {
+//				return err
+//			}
 	}
 
 	return nil
